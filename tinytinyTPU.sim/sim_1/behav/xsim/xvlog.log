@@ -1,0 +1,6 @@
+INFO: [VRFC 10-2263] Analyzing Verilog file "/home/users/alanpma/Desktop/TPU/tinytinyTPU/tinytinyTPU.srcs/sources_1/new/mmu.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module mmu
+INFO: [VRFC 10-2263] Analyzing Verilog file "/home/users/alanpma/Desktop/TPU/tinytinyTPU/tinytinyTPU.srcs/sources_1/new/pe.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module pe
+INFO: [VRFC 10-2263] Analyzing Verilog file "/home/users/alanpma/Desktop/TPU/tinytinyTPU/tinytinyTPU.srcs/sim_1/new/mmu_tb.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module mmu_tb

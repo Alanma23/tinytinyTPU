@@ -48,6 +48,7 @@ Design Notes
 ⸻
 
 ### mmu.v — 2×2 Systolic Array
+<img width="1653" height="1006" alt="image" src="https://github.com/user-attachments/assets/1fd684af-5f78-400a-a9c2-f6056643a7b6" />
 
 Instantiates PEs in a grid:
 
@@ -74,18 +75,13 @@ This is a miniature version of the TPU v1 MMU.
 The Unified Buffer acts as the system’s central memory.
 
 Responsibilities
+	
 	1.	Staggered Feeder
-	•	Independent row read-enables
-	•	Allows:
-
-Row0 @ T
-Row1 @ T+1
-
-enabling the diagonal systolic wave.
-
-	2.	Loopback Storage
-	•	Receives accumulator output
-	•	Enables multi-layer pipelines
+		Independent row read-enables
+		Allows: Row0 @ T, Row1 @ T+1 enabling the diagonal systolic wave.
+	2.  Loopback Storage
+		Receives accumulator output
+		Enables multi-layer pipelines
 
 Modeled as a dual-port RAM.
 

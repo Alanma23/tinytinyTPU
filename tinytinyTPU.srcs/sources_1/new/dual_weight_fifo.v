@@ -1,5 +1,4 @@
 `timescale 1ns / 1ps
-`timescale 1ns / 1ps
 
 module dual_weight_fifo (
     input wire clk,

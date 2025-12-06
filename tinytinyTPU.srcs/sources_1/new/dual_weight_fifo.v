@@ -4,25 +4,23 @@
 module dual_weight_fifo (
     input wire clk,
     input wire reset,
-    
-    // --- PUSH SIDE (Staggered/Interleaved) ---
+    //push
     // Simulates a narrow bus filling multiple columns
     input wire push_col0,
     input wire push_col1,
     input wire [7:0] data_in, // Shared Data Bus
-    
-    // --- POP SIDE (Parallel) ---
+    //pop
     // The MMU loads all columns simultaneously
     input wire pop,
     output reg [7:0] col0_out,
     output reg [7:0] col1_out
 );
 
-    // Two independent queues (4 deep)
+    // Two 4 deep queues
     reg [7:0] queue0 [0:3];
     reg [7:0] queue1 [0:3];
     
-    // Pointers
+    // Pointers for read/write
     reg [1:0] wr_ptr0, rd_ptr0;
     reg [1:0] wr_ptr1, rd_ptr1;
 
@@ -43,7 +41,7 @@ module dual_weight_fifo (
             wr_ptr1 <= 0; rd_ptr1 <= 0;
             col0_out <= 0; col1_out <= 0;
         end else begin
-            // --- COL 0 LOGIC ---
+            // col 0
             if (push_col0) begin
                 queue0[wr_ptr0] <= data_in;
                 wr_ptr0 <= wr_ptr0 + 1;
@@ -53,7 +51,7 @@ module dual_weight_fifo (
                 rd_ptr0 <= rd_ptr0 + 1;
             end
 
-            // --- COL 1 LOGIC ---
+            // col 1 in parallel
             if (push_col1) begin
                 queue1[wr_ptr1] <= data_in;
                 wr_ptr1 <= wr_ptr1 + 1;

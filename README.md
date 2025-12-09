@@ -111,35 +111,35 @@ accel_integration_tb.v — End-to-end accumulator → activation_pipeline → un
 ⸻
 
 ## 📁 File Layout
-
-tinytinyTPU/
-│
-├── tinytinyTPU.srcs/
-│   ├── sources_1/new/
-│   │   ├── pe.v
-│   │   ├── mmu.v
-│   │   ├── weight_fifo.v
-│   │   ├── dual_weight_fifo.v
-│   │   ├── accumulator_align.v
-│   │   ├── accumulator_mem.v
-│   │   ├── accumulator.v
-│   │   ├── activation_func.v
-│   │   ├── normalizer.v
-│   │   ├── loss_block.v
-│   │   ├── activation_pipeline.v
-│   │   └── unified_buffer.v
-│   └── sim_1/new/
-│       ├── pe_tb.v
-│       ├── mmu_tb.v
-│       ├── weight_fifo_tb.v
-│       ├── dual_weight_fifo_tb.v
-│       ├── accumulator_tb.v
-│       ├── activation_pipeline_tb.v
-│       ├── accel_integration_tb.v
-│       └── unified_buffer_tb.v
-│
-├── tinytinyTPU.xpr        # Vivado project file
-└── README.md              # (you are here)
+	
+	tinytinyTPU/
+	│
+	├── tinytinyTPU.srcs/
+	│   ├── sources_1/new/
+	│   │   ├── pe.v
+	│   │   ├── mmu.v
+	│   │   ├── weight_fifo.v
+	│   │   ├── dual_weight_fifo.v
+	│   │   ├── accumulator_align.v
+	│   │   ├── accumulator_mem.v
+	│   │   ├── accumulator.v
+	│   │   ├── activation_func.v
+	│   │   ├── normalizer.v
+	│   │   ├── loss_block.v
+	│   │   ├── activation_pipeline.v
+	│   │   └── unified_buffer.v
+	│   └── sim_1/new/
+	│       ├── pe_tb.v
+	│       ├── mmu_tb.v
+	│       ├── weight_fifo_tb.v
+	│       ├── dual_weight_fifo_tb.v
+	│       ├── accumulator_tb.v
+	│       ├── activation_pipeline_tb.v
+	│       ├── accel_integration_tb.v
+	│       └── unified_buffer_tb.v
+	│
+	├── tinytinyTPU.xpr        # Vivado project file
+	└── README.md              # (you are here)
 
 Note:
 All .cache/, .sim/, .wdb, .jou, .log files are Vivado-generated.

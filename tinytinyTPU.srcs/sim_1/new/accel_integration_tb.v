@@ -20,6 +20,72 @@ module accel_integration_tb;
     wire compute_phase  = (state == COMPUTE);
     wire drain_phase    = (state == DRAIN);
 
+    // =========================================================================
+    // Timing Verification - Expected Timing Constants
+    // =========================================================================
+    localparam EXPECTED_WEIGHT_LOAD_CYCLES = 2;   // 2 cycles to load 2x2 weights (psum path handles row delay)
+    localparam EXPECTED_COMPUTE_CYCLES     = 3;   // 3 cycles for staggered activation flow
+    localparam EXPECTED_FIRST_ACC_DELAY    = 5;   // cycles from compute_start to first acc_valid (includes accumulator pipeline)
+    localparam EXPECTED_ACC_SPACING        = 1;   // cycles between acc_valid pulses
+
+    // =========================================================================
+    // Timing Verification - Global Cycle Counter & Event Capture
+    // =========================================================================
+    reg [15:0] global_cycle;
+    reg [15:0] weight_load_start, weight_load_end;
+    reg [15:0] compute_start, compute_end;
+    reg [15:0] first_acc_valid_cycle, second_acc_valid_cycle;
+    reg        weight_load_start_captured, compute_start_captured;
+    reg        first_acc_captured, second_acc_captured;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset)
+            global_cycle <= 0;
+        else
+            global_cycle <= global_cycle + 1;
+    end
+
+    // Capture timing events
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            weight_load_start <= 0;
+            weight_load_end <= 0;
+            compute_start <= 0;
+            compute_end <= 0;
+            first_acc_valid_cycle <= 0;
+            second_acc_valid_cycle <= 0;
+            weight_load_start_captured <= 0;
+            compute_start_captured <= 0;
+            first_acc_captured <= 0;
+            second_acc_captured <= 0;
+        end else begin
+            // Capture weight load timing
+            if (state == LOAD_WEIGHT && !weight_load_start_captured) begin
+                weight_load_start <= global_cycle;
+                weight_load_start_captured <= 1;
+            end
+            if (state == LOAD_WEIGHT && cycle_cnt == 1)
+                weight_load_end <= global_cycle;
+            
+            // Capture compute timing
+            if (state == COMPUTE && !compute_start_captured) begin
+                compute_start <= global_cycle;
+                compute_start_captured <= 1;
+            end
+            if (state == COMPUTE && cycle_cnt == 2)
+                compute_end <= global_cycle;
+            
+            // Capture accumulator output timing
+            if (acc_valid && !first_acc_captured) begin
+                first_acc_valid_cycle <= global_cycle;
+                first_acc_captured <= 1;
+            end else if (acc_valid && first_acc_captured && !second_acc_captured) begin
+                second_acc_valid_cycle <= global_cycle;
+                second_acc_captured <= 1;
+            end
+        end
+    end
+
   
     // Weight FIFO
     
@@ -72,17 +138,18 @@ module accel_integration_tb;
     wire [7:0] act_row1_data = act_ub_rd_data[15:8];
     
     // Row 1 Skew Register (1-cycle delay for diagonal wavefront)
+    // Only updates when valid data is read from buffer
     reg [7:0] row1_skew_reg;
     always @(posedge clk or posedge reset) begin
         if (reset)
             row1_skew_reg <= 8'd0;
-        else if (compute_phase)
+        else if (compute_phase && act_ub_rd_valid)
             row1_skew_reg <= act_row1_data;
     end
 
-    // MMU
-    wire [7:0] mmu_row0_in = compute_phase ? act_row0_data  : 8'd0;
-    wire [7:0] mmu_row1_in = compute_phase ? row1_skew_reg  : 8'd0;  // Skewed!
+    // MMU inputs gated by rd_valid for row0, skew register always valid for row1
+    wire [7:0] mmu_row0_in = (compute_phase && act_ub_rd_valid) ? act_row0_data : 8'd0;
+    wire [7:0] mmu_row1_in = compute_phase ? row1_skew_reg : 8'd0;  // Skewed, uses previous valid data
     wire [7:0] mmu_col0_in = en_load_weight ? wf_col0_out   : 8'd0;
     wire [7:0] mmu_col1_in = en_load_weight ? wf_col1_out   : 8'd0;
     
@@ -199,23 +266,29 @@ module accel_integration_tb;
                 
                 LOAD_WEIGHT: begin
                     cycle_cnt <= cycle_cnt + 1;
-                    // 2x2 array: 3 cycles for staggered weight load
-                    if (cycle_cnt == 2)
+                    // 2x2 array: 2 cycles to load weights (psum path handles row propagation)
+                    if (cycle_cnt == 1) begin
                         state <= COMPUTE;
+                        cycle_cnt <= 0;  // Reset counter for next state
+                    end
                 end
                 
                 COMPUTE: begin
                     cycle_cnt <= cycle_cnt + 1;
                     // 2x2 matmul: 3 cycles for staggered activation flow
-                    if (cycle_cnt == 2)
+                    if (cycle_cnt == 2) begin
                         state <= DRAIN;
+                        cycle_cnt <= 0;  // Reset counter for next state
+                    end
                 end
                 
                 DRAIN: begin
                     cycle_cnt <= cycle_cnt + 1;
                     // Drain pipeline: wait for results to propagate
-                    if (cycle_cnt == 4)
+                    if (cycle_cnt == 4) begin
                         state <= DONE;
+                        cycle_cnt <= 0;  // Reset counter for next state
+                    end
                 end
                 
                 DONE: begin
@@ -239,17 +312,29 @@ module accel_integration_tb;
             result_c11 <= 0;
             result_count <= 0;
         end else if (acc_valid) begin
-            case (result_count)
-                0: begin result_c00 <= acc0; result_c01 <= acc1; end
-                1: begin result_c10 <= acc0; result_c11 <= acc1; end
-            endcase
-            result_count <= result_count + 1;
+            // Debug: show what we're capturing
+            $display("t=%0t cycle=%0d [CAPTURE] result_count=%0d acc0=%0d acc1=%0d", 
+                     $time, global_cycle, result_count, acc0, acc1);
+            if (result_count < 2) begin
+                // Only capture first 2 result pairs (for 2x2 matrix)
+                case (result_count)
+                    0: begin result_c00 <= acc0; result_c01 <= acc1; end
+                    1: begin result_c10 <= acc0; result_c11 <= acc1; end
+                endcase
+                result_count <= result_count + 1;
+            end
         end
     end
 
     // =========================================================================
     // Forward Pass Test
     // =========================================================================
+    reg timing_pass;
+    reg [15:0] actual_weight_load_cycles;
+    reg [15:0] actual_compute_cycles;
+    reg [15:0] actual_first_acc_delay;
+    reg [15:0] actual_acc_spacing;
+    
     initial begin
         // Initialize
         clk = 0; reset = 1;
@@ -257,6 +342,10 @@ module accel_integration_tb;
         wf_push_col0 = 0; wf_push_col1 = 0; wf_data_in = 0;
         act_ub_wr_valid = 0; act_ub_wr_data = 0;
         accum_en = 0; addr_sel = 0;
+        norm_gain = 16'sd256; norm_bias = 0; norm_shift = 5'd8;
+        q_inv_scale = 16'sd256; q_zero_point = 0;
+        rd_ready = 0;
+        timing_pass = 1;
         
         #20 reset = 0;
         
@@ -290,22 +379,23 @@ module accel_integration_tb;
         @(negedge clk); wf_push_col1 = 0;
         
         // =====================================================================
-        // PHASE 2: Load Activation Buffer (Both Rows Together)
+        // PHASE 2: Load Activation Buffer (Column-Major for Systolic Dataflow)
         // Activation Matrix A = [[5, 6], [7, 8]]
         //
-        // Row 0: [5, 6] -> elements A[0,0]=5, A[0,1]=6
-        // Row 1: [7, 8] -> elements A[1,0]=7, A[1,1]=8
+        // For systolic array computing C = A × W:
+        // - PE row 0 receives column 0 of A: A[0,0]=5, then A[1,0]=7
+        // - PE row 1 receives column 1 of A: A[0,1]=6, then A[1,1]=8 (skewed)
         //
-        // Stored as {row1_elem, row0_elem} pairs:
-        //   Column 0: {7, 5} = {A[1,0], A[0,0]}
-        //   Column 1: {8, 6} = {A[1,1], A[0,1]}
+        // Stored as {col1_elem, col0_elem} pairs per output row:
+        //   Row 0 data: {A[0,1], A[0,0]} = {6, 5}
+        //   Row 1 data: {A[1,1], A[1,0]} = {8, 7}
         // =====================================================================
-        $display("\n--- Phase 2: Loading Activation Buffer (Both Rows) ---");
+        $display("\n--- Phase 2: Loading Activation Buffer (Column-Major) ---");
         $display("Activation Matrix A = [[5, 6], [7, 8]]");
         
-        // Load column pairs: {row1, row0}
-        @(negedge clk); act_ub_wr_valid = 1; act_ub_wr_data = {8'd7, 8'd5}; // Col 0: A[1,0], A[0,0]
-        @(negedge clk); act_ub_wr_data = {8'd8, 8'd6};                      // Col 1: A[1,1], A[0,1]
+        // Load as {col1, col0} pairs per output row for proper systolic flow
+        @(negedge clk); act_ub_wr_valid = 1; act_ub_wr_data = {8'd6, 8'd5}; // Row 0: A[0,1], A[0,0]
+        @(negedge clk); act_ub_wr_data = {8'd8, 8'd7};                      // Row 1: A[1,1], A[1,0]
         @(negedge clk); act_ub_wr_valid = 0;
         
         // =====================================================================
@@ -343,7 +433,70 @@ module accel_integration_tb;
         $display("  C[1,0] = %0d (expected 31) %s", result_c10, result_c10 == 31 ? "PASS" : "FAIL");
         $display("  C[1,1] = %0d (expected 46) %s", result_c11, result_c11 == 46 ? "PASS" : "FAIL");
         
+        // =====================================================================
+        // PHASE 5: Timing Verification
+        // =====================================================================
+        $display("\n--- Phase 5: Timing Verification ---");
+        
+        // Calculate actual timing values
+        actual_weight_load_cycles = weight_load_end - weight_load_start + 1;
+        actual_compute_cycles = compute_end - compute_start + 1;
+        actual_first_acc_delay = first_acc_valid_cycle - compute_start;
+        actual_acc_spacing = second_acc_valid_cycle - first_acc_valid_cycle;
+        
+        // Weight load timing
+        $display("  Weight load duration: %0d cycles (expected %0d) %s", 
+                 actual_weight_load_cycles, 
+                 EXPECTED_WEIGHT_LOAD_CYCLES,
+                 actual_weight_load_cycles == EXPECTED_WEIGHT_LOAD_CYCLES ? "PASS" : "FAIL");
+        if (actual_weight_load_cycles != EXPECTED_WEIGHT_LOAD_CYCLES) timing_pass = 0;
+        
+        // Compute phase timing
+        $display("  Compute duration: %0d cycles (expected %0d) %s",
+                 actual_compute_cycles,
+                 EXPECTED_COMPUTE_CYCLES,
+                 actual_compute_cycles == EXPECTED_COMPUTE_CYCLES ? "PASS" : "FAIL");
+        if (actual_compute_cycles != EXPECTED_COMPUTE_CYCLES) timing_pass = 0;
+        
+        // First accumulator output timing
+        $display("  First acc_valid delay from compute_start: %0d cycles (expected %0d) %s",
+                 actual_first_acc_delay,
+                 EXPECTED_FIRST_ACC_DELAY,
+                 actual_first_acc_delay == EXPECTED_FIRST_ACC_DELAY ? "PASS" : "FAIL");
+        if (actual_first_acc_delay != EXPECTED_FIRST_ACC_DELAY) timing_pass = 0;
+        
+        // Accumulator output spacing
+        $display("  Acc output spacing: %0d cycles (expected %0d) %s",
+                 actual_acc_spacing,
+                 EXPECTED_ACC_SPACING,
+                 actual_acc_spacing == EXPECTED_ACC_SPACING ? "PASS" : "FAIL");
+        if (actual_acc_spacing != EXPECTED_ACC_SPACING) timing_pass = 0;
+        
+        // Detailed timing report
+        $display("\n  Timing Details:");
+        $display("    weight_load_start: cycle %0d", weight_load_start);
+        $display("    weight_load_end:   cycle %0d", weight_load_end);
+        $display("    compute_start:     cycle %0d", compute_start);
+        $display("    compute_end:       cycle %0d", compute_end);
+        $display("    first_acc_valid:   cycle %0d", first_acc_valid_cycle);
+        $display("    second_acc_valid:  cycle %0d", second_acc_valid_cycle);
+        
+        // =====================================================================
+        // Final Summary
+        // =====================================================================
+        $display("\n--- Final Summary ---");
+        
         if (result_c00 == 23 && result_c01 == 34 && result_c10 == 31 && result_c11 == 46)
+            $display("  Data correctness: PASS");
+        else
+            $display("  Data correctness: FAIL");
+        
+        if (timing_pass)
+            $display("  Timing correctness: PASS");
+        else
+            $display("  Timing correctness: FAIL");
+        
+        if ((result_c00 == 23 && result_c01 == 34 && result_c10 == 31 && result_c11 == 46) && timing_pass)
             $display("\n*** FORWARD PASS TEST PASSED ***");
         else
             $display("\n*** FORWARD PASS TEST FAILED ***");
@@ -357,23 +510,24 @@ module accel_integration_tb;
     end
 
     // =========================================================================
-    // Debug Tracing
+    // Debug Tracing (with global cycle)
     // =========================================================================
     always @(posedge clk) begin
         if (state == LOAD_WEIGHT)
-            $display("t=%0t [LOAD_WEIGHT] cycle=%0d col0=%0d col1=%0d", 
-                     $time, cycle_cnt, wf_col0_out, wf_col1_out);
+            $display("t=%0t cycle=%0d [LOAD_WEIGHT] fsm_cnt=%0d col0=%0d col1=%0d", 
+                     $time, global_cycle, cycle_cnt, wf_col0_out, wf_col1_out);
         
         if (state == COMPUTE)
-            $display("t=%0t [COMPUTE] cycle=%0d row0=%0d row1=%0d (skewed) | raw_row1=%0d", 
-                     $time, cycle_cnt, mmu_row0_in, mmu_row1_in, act_row1_data);
+            $display("t=%0t cycle=%0d [COMPUTE] fsm_cnt=%0d row0=%0d row1=%0d (skewed) | raw_row1=%0d", 
+                     $time, global_cycle, cycle_cnt, mmu_row0_in, mmu_row1_in, act_row1_data);
         
         if (state == DRAIN)
-            $display("t=%0t [DRAIN] cycle=%0d mmu_out: acc0=%0d acc1=%0d", 
-                     $time, cycle_cnt, mmu_acc0_out, mmu_acc1_out);
+            $display("t=%0t cycle=%0d [DRAIN] fsm_cnt=%0d mmu_out: acc0=%0d acc1=%0d", 
+                     $time, global_cycle, cycle_cnt, mmu_acc0_out, mmu_acc1_out);
         
         if (acc_valid)
-            $display("t=%0t [ACCUM] acc0=%0d acc1=%0d", $time, acc0, acc1);
+            $display("t=%0t cycle=%0d [ACCUM] acc0=%0d acc1=%0d", 
+                     $time, global_cycle, acc0, acc1);
     end
 
 endmodule

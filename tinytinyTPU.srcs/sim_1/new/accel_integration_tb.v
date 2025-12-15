@@ -378,7 +378,7 @@ module accel_integration_tb;
         @(negedge clk); wf_push_col1 = 0;
         
         // =====================================================================
-        // phase 2
+        // phase 1
         // Activation Matrix A = [[5, 6], [7, 8]]
         //
         // For systolic array computing C = A × W:
@@ -389,7 +389,7 @@ module accel_integration_tb;
         //   Row 0 data: {A[0,1], A[0,0]} = {6, 5}
         //   Row 1 data: {A[1,1], A[1,0]} = {8, 7}
         // =====================================================================
-        $display("\n Phase 2: Loading Activation Buffer (Column-Major) ---");
+        $display("\n Phase 1: Loading Activation Buffer (Column-Major) ---");
         $display("Activation Matrix A = [[5, 6], [7, 8]]");
         
         // Load as {col1, col0} pairs per output row for proper systolic flow
@@ -398,14 +398,14 @@ module accel_integration_tb;
         @(negedge clk); act_ub_wr_valid = 0;
         
         // =====================================================================
-        // phase 3
+        // phase 2
         // Expected Results:
         //   C[0,0] = A[0,0]*W[0,0] + A[0,1]*W[1,0] = 5*1 + 6*3 = 23
         //   C[0,1] = A[0,0]*W[0,1] + A[0,1]*W[1,1] = 5*2 + 6*4 = 34
         //   C[1,0] = A[1,0]*W[0,0] + A[1,1]*W[1,0] = 7*1 + 8*3 = 31
         //   C[1,1] = A[1,0]*W[0,1] + A[1,1]*W[1,1] = 7*2 + 8*4 = 46
         // =====================================================================
-        $display("\n Phase 3: Computing C = A * W ---");
+        $display("\n Phase 2: Computing C = A * W ---");
         $display("Expected Results:");
         $display("  C[0,0] = 5*1 + 6*3 = 23");
         $display("  C[0,1] = 5*2 + 6*4 = 34");
@@ -420,22 +420,17 @@ module accel_integration_tb;
         // Wait for FSM to complete
         wait(state == DONE);
         
-        // =====================================================================
-        // phase 4
-        // =====================================================================
         repeat(5) @(negedge clk);
         
-        $display("\n Phase 4: Results Verification ---");
+        $display("\n Phase 3: Results Verification ---");
         $display("Actual Results from Accumulator:");
         $display("  C[0,0] = %0d (expected 23) %s", result_c00, result_c00 == 23 ? "PASS" : "FAIL");
         $display("  C[0,1] = %0d (expected 34) %s", result_c01, result_c01 == 34 ? "PASS" : "FAIL");
         $display("  C[1,0] = %0d (expected 31) %s", result_c10, result_c10 == 31 ? "PASS" : "FAIL");
         $display("  C[1,1] = %0d (expected 46) %s", result_c11, result_c11 == 46 ? "PASS" : "FAIL");
         
-        // =====================================================================
-        // PHASE 5: Timing Verification
-        // =====================================================================
-        $display("\n Phase 5: Timing Verification ---");
+        // PHASE 4: Timing Verification
+        $display("\n Phase 4: Timing Verification ---");
         
         // Calculate actual timing values
         actual_weight_load_cycles = weight_load_end - weight_load_start + 1;
@@ -479,10 +474,8 @@ module accel_integration_tb;
         $display("    compute_end:       cycle %0d", compute_end);
         $display("    first_acc_valid:   cycle %0d", first_acc_valid_cycle);
         $display("    second_acc_valid:  cycle %0d", second_acc_valid_cycle);
-        
-        // =====================================================================
+
         // Final Summary
-        // =====================================================================
         $display("\n--- Final Summary ---");
         
         if (result_c00 == 23 && result_c01 == 34 && result_c10 == 31 && result_c11 == 46)
@@ -502,15 +495,12 @@ module accel_integration_tb;
         
         $display("\n================================================================");
         $display("          FORWARD PASS TEST COMPLETE");
-        $display("================================================================");
         
         repeat(10) @(negedge clk);
         $finish;
     end
 
-    // =========================================================================
     // Debug Tracing (with global cycle)
-    // =========================================================================
     always @(posedge clk) begin
         if (state == LOAD_WEIGHT)
             $display("t=%0t cycle=%0d [LOAD_WEIGHT] fsm_cnt=%0d col0=%0d col1=%0d | cap_col0=%b cap_col1=%b", 

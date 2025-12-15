@@ -20,17 +20,13 @@ module accel_integration_tb;
     wire compute_phase  = (state == COMPUTE);
     wire drain_phase    = (state == DRAIN);
 
-    // =========================================================================
     // Timing Verification - Expected Timing Constants
-    // =========================================================================
-    localparam EXPECTED_WEIGHT_LOAD_CYCLES = 2;   // 2 cycles to load 2x2 weights (psum path handles row delay)
+    localparam EXPECTED_WEIGHT_LOAD_CYCLES = 3;   // 3 cycles for staggered column weight loading
     localparam EXPECTED_COMPUTE_CYCLES     = 3;   // 3 cycles for staggered activation flow
     localparam EXPECTED_FIRST_ACC_DELAY    = 5;   // cycles from compute_start to first acc_valid (includes accumulator pipeline)
     localparam EXPECTED_ACC_SPACING        = 1;   // cycles between acc_valid pulses
 
-    // =========================================================================
     // Timing Verification - Global Cycle Counter & Event Capture
-    // =========================================================================
     reg [15:0] global_cycle;
     reg [15:0] weight_load_start, weight_load_end;
     reg [15:0] compute_start, compute_end;
@@ -64,7 +60,7 @@ module accel_integration_tb;
                 weight_load_start <= global_cycle;
                 weight_load_start_captured <= 1;
             end
-            if (state == LOAD_WEIGHT && cycle_cnt == 1)
+            if (state == LOAD_WEIGHT && cycle_cnt == 2)
                 weight_load_end <= global_cycle;
             
             // Capture compute timing
@@ -153,12 +149,21 @@ module accel_integration_tb;
     wire [7:0] mmu_col0_in = en_load_weight ? wf_col0_out   : 8'd0;
     wire [7:0] mmu_col1_in = en_load_weight ? wf_col1_out   : 8'd0;
     
+    // Per-column weight capture enables for staggered diagonal wavefront
+    // With column skew in FIFO: col0 outputs valid data on cycles 0,1; col1 on cycles 1,2
+    // Column 0 PEs (PE00, PE10) capture on cycle 1 (when col0 has W[0,0] and psum has W[1,0])
+    // Column 1 PEs (PE01, PE11) capture on cycle 2 (when col1 has W[0,1] and psum has W[1,1])
+    wire en_capture_col0 = en_load_weight && (cycle_cnt == 1);
+    wire en_capture_col1 = en_load_weight && (cycle_cnt == 2);
+    
     wire [15:0] mmu_acc0_out, mmu_acc1_out;
     
     mmu mmu_u (
         .clk(clk),
         .reset(reset),
-        .en_load_weight(en_load_weight),
+        .en_weight_pass(en_load_weight),      // Pass psum through during entire load phase
+        .en_capture_col0(en_capture_col0),    // Column 0 captures on cycle 1
+        .en_capture_col1(en_capture_col1),    // Column 1 captures on cycle 2
         .row0_in(mmu_row0_in),
         .row1_in(mmu_row1_in),
         .col0_in(mmu_col0_in),
@@ -191,7 +196,7 @@ module accel_integration_tb;
     );
 
 
-    // BACK FLOW: Activation Pipeline
+    // back flow: Activation Pipeline
 
     reg signed [15:0] norm_gain;
     reg signed [31:0] norm_bias;
@@ -221,7 +226,7 @@ module accel_integration_tb;
     );
 
 
-    // BACK FLOW: Output Unified Buffer
+    // Output Unified Buffer
 
     reg rd_ready;
     wire ub_rd_valid;
@@ -242,14 +247,10 @@ module accel_integration_tb;
         .count()
     );
 
-    // =========================================================================
     // Clock Generation
-    // =========================================================================
     always #5 clk = ~clk;
 
-    // =========================================================================
     // FSM Controller
-    // =========================================================================
     reg start_compute;
     
     always @(posedge clk or posedge reset) begin
@@ -266,8 +267,11 @@ module accel_integration_tb;
                 
                 LOAD_WEIGHT: begin
                     cycle_cnt <= cycle_cnt + 1;
-                    // 2x2 array: 2 cycles to load weights (psum path handles row propagation)
-                    if (cycle_cnt == 1) begin
+                    // 2x2 array: 3 cycles for staggered column weight loading
+                    // Cycle 0: col0=W[1,0], col1=0 (skew). Prime pipeline.
+                    // Cycle 1: col0=W[0,0], col1=W[1,1]. Column 0 PEs capture.
+                    // Cycle 2: col0=hold, col1=W[0,1]. Column 1 PEs capture.
+                    if (cycle_cnt == 2) begin
                         state <= COMPUTE;
                         cycle_cnt <= 0;  // Reset counter for next state
                     end
@@ -298,9 +302,7 @@ module accel_integration_tb;
         end
     end
 
-    // =========================================================================
     // Test Results Tracking
-    // =========================================================================
     reg [31:0] result_c00, result_c01, result_c10, result_c11;
     reg [1:0] result_count;
     
@@ -326,9 +328,7 @@ module accel_integration_tb;
         end
     end
 
-    // =========================================================================
     // Forward Pass Test
-    // =========================================================================
     reg timing_pass;
     reg [15:0] actual_weight_load_cycles;
     reg [15:0] actual_compute_cycles;
@@ -349,12 +349,11 @@ module accel_integration_tb;
         
         #20 reset = 0;
         
-        $display("================================================================");
-        $display("          FORWARD PASS INTEGRATION TEST");
-        $display("================================================================");
+        $display("******");
+        $display("FORWARD PASS INTEGRATION TEST");
         
         // =====================================================================
-        // PHASE 1: Load Weight FIFO
+        // phase 1
         // Weight Matrix W = [[1, 2], [3, 4]]
         //
         // PE layout after weight load:
@@ -365,7 +364,7 @@ module accel_integration_tb;
         //
         // Load order: bottom row first (weights shift down through psum path)
         // =====================================================================
-        $display("\n--- Phase 1: Loading Weight FIFO ---");
+        $display("\n Phase 1: Loading Weight FIFO ---");
         $display("Weight Matrix W = [[1, 2], [3, 4]]");
         
         // Column 0: [3, 1] (W[1,0], W[0,0]) - bottom first
@@ -379,7 +378,7 @@ module accel_integration_tb;
         @(negedge clk); wf_push_col1 = 0;
         
         // =====================================================================
-        // PHASE 2: Load Activation Buffer (Column-Major for Systolic Dataflow)
+        // phase 2
         // Activation Matrix A = [[5, 6], [7, 8]]
         //
         // For systolic array computing C = A × W:
@@ -390,7 +389,7 @@ module accel_integration_tb;
         //   Row 0 data: {A[0,1], A[0,0]} = {6, 5}
         //   Row 1 data: {A[1,1], A[1,0]} = {8, 7}
         // =====================================================================
-        $display("\n--- Phase 2: Loading Activation Buffer (Column-Major) ---");
+        $display("\n Phase 2: Loading Activation Buffer (Column-Major) ---");
         $display("Activation Matrix A = [[5, 6], [7, 8]]");
         
         // Load as {col1, col0} pairs per output row for proper systolic flow
@@ -399,14 +398,14 @@ module accel_integration_tb;
         @(negedge clk); act_ub_wr_valid = 0;
         
         // =====================================================================
-        // PHASE 3: Compute C = A * W
+        // phase 3
         // Expected Results:
         //   C[0,0] = A[0,0]*W[0,0] + A[0,1]*W[1,0] = 5*1 + 6*3 = 23
         //   C[0,1] = A[0,0]*W[0,1] + A[0,1]*W[1,1] = 5*2 + 6*4 = 34
         //   C[1,0] = A[1,0]*W[0,0] + A[1,1]*W[1,0] = 7*1 + 8*3 = 31
         //   C[1,1] = A[1,0]*W[0,1] + A[1,1]*W[1,1] = 7*2 + 8*4 = 46
         // =====================================================================
-        $display("\n--- Phase 3: Computing C = A * W ---");
+        $display("\n Phase 3: Computing C = A * W ---");
         $display("Expected Results:");
         $display("  C[0,0] = 5*1 + 6*3 = 23");
         $display("  C[0,1] = 5*2 + 6*4 = 34");
@@ -422,11 +421,11 @@ module accel_integration_tb;
         wait(state == DONE);
         
         // =====================================================================
-        // PHASE 4: Verify Results
+        // phase 4
         // =====================================================================
         repeat(5) @(negedge clk);
         
-        $display("\n--- Phase 4: Results Verification ---");
+        $display("\n Phase 4: Results Verification ---");
         $display("Actual Results from Accumulator:");
         $display("  C[0,0] = %0d (expected 23) %s", result_c00, result_c00 == 23 ? "PASS" : "FAIL");
         $display("  C[0,1] = %0d (expected 34) %s", result_c01, result_c01 == 34 ? "PASS" : "FAIL");
@@ -436,7 +435,7 @@ module accel_integration_tb;
         // =====================================================================
         // PHASE 5: Timing Verification
         // =====================================================================
-        $display("\n--- Phase 5: Timing Verification ---");
+        $display("\n Phase 5: Timing Verification ---");
         
         // Calculate actual timing values
         actual_weight_load_cycles = weight_load_end - weight_load_start + 1;
@@ -514,8 +513,8 @@ module accel_integration_tb;
     // =========================================================================
     always @(posedge clk) begin
         if (state == LOAD_WEIGHT)
-            $display("t=%0t cycle=%0d [LOAD_WEIGHT] fsm_cnt=%0d col0=%0d col1=%0d", 
-                     $time, global_cycle, cycle_cnt, wf_col0_out, wf_col1_out);
+            $display("t=%0t cycle=%0d [LOAD_WEIGHT] fsm_cnt=%0d col0=%0d col1=%0d | cap_col0=%b cap_col1=%b", 
+                     $time, global_cycle, cycle_cnt, wf_col0_out, wf_col1_out, en_capture_col0, en_capture_col1);
         
         if (state == COMPUTE)
             $display("t=%0t cycle=%0d [COMPUTE] fsm_cnt=%0d row0=%0d row1=%0d (skewed) | raw_row1=%0d", 

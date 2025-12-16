@@ -3,6 +3,7 @@
 A minimal 2×2 systolic-array TPU-style matrix-multiply unit, implemented in Verilog.
 
 The design models the full post-MAC pipeline: **MMU → Accumulator (alignment + double buffering) → Activation + Normalization + Loss → Quantization → Unified Buffer**.
+<img width="1657" height="878" alt="image" src="https://github.com/user-attachments/assets/7567e606-5bc3-48ea-acea-a1b1d4a68253" />
 
 ---
 

@@ -211,6 +211,49 @@ The testbench validates:
 
 ---
 
+## 🔁 Multi-Layer MLP Inference
+
+The `mlp_integration_tb.v` demonstrates multi-layer neural network inference following TPU v1 architecture:
+
+### Architecture (per Jouppi et al., 2017)
+
+```
+Weight FIFO → MMU (systolic) → Accumulator → Activation Pipeline → UB
+                ↑                                                    │
+                └──────────── feedback (next layer input) ──────────┘
+```
+
+### Ping-Pong Unified Buffers
+
+For layer-to-layer data flow, two unified buffers alternate roles:
+- **Layer N:** UB_A is input, UB_B receives quantized output
+- **Layer N+1:** UB_B is input, UB_A receives quantized output
+
+### 2-Layer MLP Demo
+
+```
+Input:  A  = [[5, 6], [7, 8]]
+
+Layer 1: H = ReLU(A × W1)    where W1 = [[1, 2], [3, 4]]
+         H = [[23, 34], [31, 46]]
+
+Layer 2: Y = ReLU(H × W2)    where W2 = [[1, 1], [1, 1]]
+         Y = [[57, 57], [77, 77]]
+```
+
+### FSM States for Multi-Layer
+
+| State | Description |
+|-------|-------------|
+| `LOAD_WEIGHT` | Load weights for current layer (3 cycles) |
+| `LOAD_ACT` | Load initial activations (layer 0 only) |
+| `COMPUTE` | Systolic array matrix multiply (3 cycles) |
+| `DRAIN` | Flush pipeline, write to output buffer |
+| `TRANSFER` | Repack 8-bit outputs to 16-bit packed format |
+| `NEXT_LAYER` | Swap buffers, reset FIFO, advance layer counter |
+
+---
+
 ## 🧪 Testbenches
 
 | Testbench | Description |
@@ -223,6 +266,7 @@ The testbench validates:
 | `activation_pipeline_tb.v` | Activation/normalization/quantization/loss with varying scales |
 | `unified_buffer_tb.v` | Ready/valid protocol, fullness, ordering, and backpressure |
 | `accel_integration_tb.v` | End-to-end forward pass with timing verification |
+| `mlp_integration_tb.v` | Multi-layer MLP inference with ping-pong buffers |
 
 ---
 
@@ -253,6 +297,7 @@ tinytinyTPU/
 │       ├── accumulator_tb.v
 │       ├── activation_pipeline_tb.v
 │       ├── accel_integration_tb.v
+│       ├── mlp_integration_tb.v
 │       └── unified_buffer_tb.v
 │
 ├── tinytinyTPU.xpr        # Vivado project file

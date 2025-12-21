@@ -99,36 +99,34 @@ test_mlp:
 lint:
 	verilator --lint-only -Wall -Wno-PINCONNECTEMPTY -Wno-UNUSEDSIGNAL -Wno-MULTITOP $(RTL_SOURCES)
 
-# Waveform viewer with interactive selection
+# Waveform viewer
 waves:
-	@if [ -n "$(MODULE)" ]; then \
-		if [ -f $(WAVE_DIR)/$(MODULE).vcd ]; then \
-			echo "Opening $(MODULE).vcd"; \
-			$(WAVE_VIEWER) $(WAVE_DIR)/$(MODULE).vcd; \
-		else \
-			echo "Error: $(WAVE_DIR)/$(MODULE).vcd not found"; \
-			echo "Generate it with: make test_$(MODULE) WAVES=1"; \
-		fi; \
+ifdef MODULE
+	@if [ -f $(WAVE_DIR)/$(MODULE).vcd ]; then \
+		echo "Opening $(MODULE).vcd"; \
+		$(WAVE_VIEWER) $(WAVE_DIR)/$(MODULE).vcd; \
+	else \
+		echo "Error: $(WAVE_DIR)/$(MODULE).vcd not found"; \
+		echo "Generate it with: make test_$(MODULE) WAVES=1"; \
+	fi
+else
+	@echo ""
+	@echo "Available waveforms:"
+	@echo ""
+	@for f in $$(ls $(WAVE_DIR)/*.vcd 2>/dev/null | sort); do \
+		name=$$(basename $$f .vcd); \
+		echo "  - $$name"; \
+	done
+	@if [ -z "$$(ls $(WAVE_DIR)/*.vcd 2>/dev/null)" ]; then \
+		echo "  No waveforms found."; \
+		echo ""; \
+		echo "Generate waveforms with: make test WAVES=1"; \
 	else \
 		echo ""; \
-		echo "Available waveforms:"; \
-		echo ""; \
-		i=1; \
-		for f in $$(ls $(WAVE_DIR)/*.vcd 2>/dev/null | sort); do \
-			name=$$(basename $$f .vcd); \
-			echo "  $$i) $$name"; \
-			i=$$((i + 1)); \
-		done; \
-		if [ $$i -eq 1 ]; then \
-			echo "  No waveforms found."; \
-			echo ""; \
-			echo "Generate waveforms with: make test WAVES=1"; \
-		else \
-			echo ""; \
-			echo "Usage: make waves MODULE=<name>"; \
-			echo "Example: make waves MODULE=pe"; \
-		fi; \
+		echo "Usage: make waves MODULE=<name>"; \
+		echo "Example: make waves MODULE=pe"; \
 	fi
+endif
 
 # Clean
 clean_waves:

@@ -69,6 +69,8 @@ sources. The rtl/ folder contains the migrated SystemVerilog versions.
 
 ### Running Tests
 
+All simulation commands must be run from the `sim/` directory:
+
 ```bash
 cd sim
 
